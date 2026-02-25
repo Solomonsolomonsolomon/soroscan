@@ -7,7 +7,7 @@ export interface SorobanEvent {
   ts: string
   contract: string
   type: string
-  data: any
+  data: Record<string, unknown>
   status: "PROCESSED" | "INGESTING" | "ERROR"
 }
 
@@ -19,10 +19,15 @@ export function useWebSocket(contractId: string) {
   const ws = useRef<WebSocket | null>(null)
   const reconnectTimeout = useRef<NodeJS.Timeout | null>(null)
 
+  const connectRef = useRef<(() => void) | null>(null)
+
   const connect = useCallback(() => {
     if (ws.current?.readyState === WebSocket.OPEN) return
 
-    setStatus("CONNECTING")
+    // Wrap in microtask to avoid synchronous setState warning during effect
+    Promise.resolve().then(() => {
+      setStatus("CONNECTING")
+    })
     
     // Using environment variable or default localhost
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000"
@@ -50,7 +55,7 @@ export function useWebSocket(contractId: string) {
       // Attempt to reconnect after 5 seconds if not closed cleanly
       if (!event.wasClean) {
         reconnectTimeout.current = setTimeout(() => {
-          connect()
+          connectRef.current?.()
         }, 5000)
       }
     }
@@ -62,6 +67,10 @@ export function useWebSocket(contractId: string) {
 
     ws.current = socket
   }, [contractId])
+
+  useEffect(() => {
+    connectRef.current = connect
+  }, [connect])
 
   useEffect(() => {
     connect()

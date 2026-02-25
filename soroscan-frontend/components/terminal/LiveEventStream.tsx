@@ -5,7 +5,7 @@ import { useWebSocket, SorobanEvent, ConnectionStatus } from "@/src/hooks/useWeb
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "./Table"
 import { Button } from "./Button"
 import { Input } from "./Input"
-import { Copy, Pause, Play, AlertCircle, CheckCircle2, Loader2 } from "lucide-react"
+import { Copy, Pause, Play, CheckCircle2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface LiveEventStreamProps {
@@ -13,7 +13,7 @@ interface LiveEventStreamProps {
 }
 
 export function LiveEventStream({ contractId }: LiveEventStreamProps) {
-  const { events, status, isConnected, reconnect } = useWebSocket(contractId)
+  const { events, status, reconnect } = useWebSocket(contractId)
   const [isPaused, setIsPaused] = React.useState(false)
   const [newEventsCount, setNewEventsCount] = React.useState(0)
   const lastEventId = React.useRef<string | null>(null)

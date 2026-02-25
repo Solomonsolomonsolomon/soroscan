@@ -3,6 +3,23 @@
 
 type Query {
   events(contractId: String!, first: Int!): EventConnection!
+  me: User
+}
+
+type Mutation {
+  login(email: String!, password: String!): AuthPayload!
+  refreshToken(refresh: String!): AuthPayload!
+}
+
+type AuthPayload {
+  access: String!
+  refresh: String!
+  user: User!
+}
+
+type User {
+  id: ID!
+  email: String!
 }
 
 type EventConnection {

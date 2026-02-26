@@ -16,7 +16,7 @@ from strawberry.types import Info
 from .models import ContractEvent, TrackedContract, WebhookDeliveryLog
 from .services.timeline import build_timeline
 from django.utils import timezone
-from django.db.models import Count, Avg, Q
+from django.db.models import Count, Max
 
 
 def _get_authenticated_user(info: Info):
@@ -393,7 +393,6 @@ class Query:
         except TrackedContract.DoesNotExist:
             return None
 
-        from django.db.models import Count, Max
 
         stats = contract.events.aggregate(
             total=Count("id"),

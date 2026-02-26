@@ -4,9 +4,12 @@ import {
   HttpLink,
   ApolloLink,
   from,
+  Operation,
+  NextLink,
 } from '@apollo/client';
 import { onError } from '@apollo/client/link/error';
 import { RetryLink } from '@apollo/client/link/retry';
+import { getAccessToken, clearTokens, refreshAccessToken } from './auth';
 
 // HTTP Link - connects to the GraphQL endpoint
 const httpLink = new HttpLink({
@@ -15,48 +18,74 @@ const httpLink = new HttpLink({
 });
 
 // Auth Link - adds JWT token to request headers
-const authLink = new ApolloLink((operation, forward) => {
-  // Only access localStorage on client side
-  if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('access_token');
-    if (token) {
-      operation.setContext(({ headers = {} }) => ({
-        headers: {
-          ...headers,
-          authorization: `Bearer ${token}`,
-        },
-      }));
-    }
+const authLink = new ApolloLink((operation: Operation, forward: NextLink) => {
+  const token = getAccessToken();
+  
+  if (token) {
+    operation.setContext(({ headers = {} }: { headers: Record<string, string> }) => ({
+      headers: {
+        ...headers,
+        authorization: `Bearer ${token}`,
+      },
+    }));
   }
+  
   return forward(operation);
 });
 
 // Error Link - handles and logs errors
-const errorLink = onError(({ graphQLErrors, networkError }) => {
+const errorLink = onError(({ 
+  graphQLErrors, 
+  networkError, 
+  operation, 
+  forward 
+}: { 
+  graphQLErrors?: readonly { message: string; extensions?: Record<string, unknown> }[];
+  networkError?: Error | Record<string, unknown>;
+  operation: Operation;
+  forward: NextLink;
+}) => {
   if (graphQLErrors) {
-    graphQLErrors.forEach(({ message, locations, path, extensions }) => {
-      console.error(
-        `[GraphQL error]: Message: ${message}, Location: ${JSON.stringify(locations)}, Path: ${path}`
-      );
+    for (const error of graphQLErrors) {
+      const { message, extensions } = error;
+      console.error(`[GraphQL error]: Message: ${message}`);
       
-      // Handle authentication errors
-      if (extensions?.code === 'UNAUTHENTICATED') {
-        // Clear invalid token
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('access_token');
-        }
-        console.warn('Authentication token invalid or expired');
+      // Handle authentication errors (401 / UNAUTHENTICATED)
+      if (extensions?.code === 'UNAUTHENTICATED' || extensions?.status === 401) {
+        console.warn('Authentication token invalid or expired. Attempting refresh...');
+        
+        // Return an observable that will refresh the token and retry the operation
+        return new ApolloLink((op: Operation, fw: NextLink) => {
+          // Promise that will resolve with the new token or null
+          const refreshPromise = refreshAccessToken();
+          
+          return from(refreshPromise).flatMap((newToken: string | null) => {
+            if (!newToken) {
+              clearTokens();
+              // Redirect to login if on client side
+              if (typeof window !== 'undefined') {
+                window.location.href = '/login';
+              }
+              return from([]);
+            }
+            
+            // Re-set headers with new token
+            op.setContext(({ headers = {} }: { headers: Record<string, string> }) => ({
+              headers: {
+                ...headers,
+                authorization: `Bearer ${newToken}`,
+              },
+            }));
+            
+            return fw(op);
+          });
+        }).request(operation, forward);
       }
-    });
+    }
   }
 
   if (networkError) {
     console.error(`[Network error]: ${networkError.message}`);
-    
-    // Log additional network error details
-    if ('statusCode' in networkError) {
-      console.error(`Status code: ${networkError.statusCode}`);
-    }
   }
 });
 
@@ -69,7 +98,7 @@ const retryLink = new RetryLink({
   },
   attempts: {
     max: 3,
-    retryIf: (error) => {
+    retryIf: (error: Error) => {
       // Retry on network errors but not on GraphQL errors
       return !!error && !error.message.includes('GraphQL error');
     },
@@ -89,7 +118,7 @@ export const client = new ApolloClient({
           // Add pagination helpers if needed
           events: {
             keyArgs: ['filters'],
-            merge(existing = [], incoming) {
+            merge(existing: unknown[] = [], incoming: unknown[]) {
               return [...existing, ...incoming];
             },
           },
@@ -116,31 +145,3 @@ export const client = new ApolloClient({
     },
   },
 });
-
-// Helper function to refresh the token (to be implemented with backend Issue #2)
-export const refreshToken = async (): Promise<string | null> => {
-  try {
-    // This will be implemented when backend token refresh is ready
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/token/refresh/`,
-      {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    if (response.ok) {
-      const data = await response.json();
-      if (data.access_token) {
-        localStorage.setItem('access_token', data.access_token);
-        return data.access_token;
-      }
-    }
-  } catch (error) {
-    console.error('Token refresh failed:', error);
-  }
-  return null;
-};

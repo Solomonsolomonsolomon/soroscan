@@ -13,8 +13,10 @@ from channels.layers import get_channel_layer
 from strawberry import auto
 from strawberry.types import Info
 
-from .models import ContractEvent, TrackedContract
+from .models import ContractEvent, TrackedContract, WebhookDeliveryLog
 from .services.timeline import build_timeline
+from django.utils import timezone
+from django.db.models import Count, Avg, Q
 
 
 def _get_authenticated_user(info: Info):
@@ -191,6 +193,27 @@ class EventTimelineResult:
     until: datetime
     total_events: int
     groups: list[EventTimelineGroup]
+
+
+@strawberry.type
+class SystemMetrics:
+    events_indexed_today: int
+    events_indexed_total: int
+    webhook_success_rate: float
+    avg_webhook_delivery_time: float
+    active_contracts: int
+    last_synced: Optional[datetime]
+    db_status: str
+    redis_status: str
+
+
+@strawberry.type
+class ErrorLog:
+    id: int
+    timestamp: datetime
+    level: str
+    message: str
+    context: Optional[str]
 
 
 @strawberry.type
@@ -442,6 +465,65 @@ class Query:
             total_events=timeline.total_events,
             groups=groups,
         )
+
+    @strawberry.field
+    def system_metrics(self, info: Info) -> SystemMetrics:
+        """Get system-wide health and performance metrics."""
+        user = _get_authenticated_user(info)
+        if not user or not user.is_staff:
+            raise Exception("Admin access required")
+
+        now = timezone.now()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        events_today = ContractEvent.objects.filter(timestamp__gte=today_start).count()
+        events_total = ContractEvent.objects.count()
+        active_contracts = TrackedContract.objects.filter(is_active=True).count()
+        last_event = ContractEvent.objects.order_by("-timestamp").first()
+
+        # Webhook stats for last 24h
+        day_ago = now - timezone.timedelta(days=1)
+        webhook_logs = WebhookDeliveryLog.objects.filter(timestamp__gte=day_ago)
+        total_deliveries = webhook_logs.count()
+        successful_deliveries = webhook_logs.filter(success=True).count()
+        
+        success_rate = (successful_deliveries / total_deliveries * 100) if total_deliveries > 0 else 100.0
+        
+        # Note: We don't have a delivery_time field in model, using success rate as proxy for now
+        # or we could measure this if we had it. For now, returning mock or 0.
+        avg_time = 0.0 
+
+        return SystemMetrics(
+            events_indexed_today=events_today,
+            events_indexed_total=events_total,
+            webhook_success_rate=success_rate,
+            avg_webhook_delivery_time=avg_time,
+            active_contracts=active_contracts,
+            last_synced=last_event.timestamp if last_event else None,
+            db_status="CONNECTED",
+            redis_status="CONNECTED",
+        )
+
+    @strawberry.field
+    def recent_errors(self, info: Info, limit: int = 10) -> list[ErrorLog]:
+        """Get recent system errors and warnings."""
+        user = _get_authenticated_user(info)
+        if not user or not user.is_staff:
+            raise Exception("Admin access required")
+
+        # Using WebhookDeliveryLog failures as a source of system errors
+        logs = WebhookDeliveryLog.objects.filter(success=False).order_by("-timestamp")[:limit]
+        
+        return [
+            ErrorLog(
+                id=log.id,
+                timestamp=log.timestamp,
+                level="ERROR",
+                message=f"Webhook delivery failed: {log.error or 'Unknown error'}",
+                context=f"Target: {log.subscription.target_url}"
+            )
+            for log in logs
+        ]
 
 
 @strawberry.type

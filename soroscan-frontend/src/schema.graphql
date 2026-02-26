@@ -2,7 +2,28 @@
 # Replace this with actual schema introspection when backend is running
 
 type Query {
-  events(contractId: String!, first: Int!): EventConnection!
+  events(contractId: String, first: Int!): EventConnection!
+  systemMetrics: SystemMetrics!
+  recentErrors(limit: Int): [ErrorLog!]!
+}
+
+type SystemMetrics {
+  eventsIndexedToday: Int!
+  eventsIndexedTotal: Int!
+  webhookSuccessRate: Float!
+  avgWebhookDeliveryTime: Float!
+  activeContracts: Int!
+  lastSynced: String
+  dbStatus: String!
+  redisStatus: String!
+}
+
+type ErrorLog {
+  id: ID!
+  timestamp: String!
+  level: String!
+  message: String!
+  context: String
 }
 
 type EventConnection {

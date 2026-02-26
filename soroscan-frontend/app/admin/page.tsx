@@ -23,7 +23,6 @@ import { fetchSystemMetrics, SystemMetricsData } from "@/components/ingest/graph
 import { useToast } from "@/context/ToastContext"
 
 export default function AdminDashboard() {
-  const { showToast } = useToast()
   const [data, setData] = React.useState<SystemMetricsData | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [refreshing, setRefreshing] = React.useState(false)
@@ -37,10 +36,11 @@ export default function AdminDashboard() {
       const result = await fetchSystemMetrics()
       setData(result)
       setError(null)
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "UNAUTHORIZED_ACCESS: Admin role required."
       console.error("Failed to fetch admin metrics:", err)
-      setError(err.message || "UNAUTHORIZED_ACCESS: Admin role required.")
-      if (err.message?.includes("Admin access required")) {
+      setError(message)
+      if (message.includes("Admin access required")) {
         // Handle 401/403 state
       }
     } finally {

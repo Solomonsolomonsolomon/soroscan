@@ -89,6 +89,11 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": ":memory:",
+        "OPTIONS": {
+            # Run on every new connection (Django 5.1+). Test data is
+            # disposable, so skip fsync and keep the rollback journal in RAM.
+            "init_command": "PRAGMA synchronous=OFF; PRAGMA journal_mode=MEMORY;",
+        },
     }
 }
 

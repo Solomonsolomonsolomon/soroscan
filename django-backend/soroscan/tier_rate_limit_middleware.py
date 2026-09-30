@@ -13,6 +13,9 @@ from soroscan.ingest.models import APIKey
 
 WINDOW_SECONDS = 3600
 CACHE_PREFIX = "soroscan_tier_sliding_window"
+TIER_HEADER = "X-RateLimit-Tier"
+# Tier reported for requests without a valid API key.
+ANONYMOUS_TIER = APIKey.Tier.FREE
 
 
 class TieredAPIKeyRateLimitMiddleware(MiddlewareMixin):
@@ -21,11 +24,11 @@ class TieredAPIKeyRateLimitMiddleware(MiddlewareMixin):
     async def __call__(self, request):
         raw_key = request.headers.get("X-API-Key")
         if not raw_key:
-            return await self.get_response(request)
+            return await self._anonymous_response(request)
 
         api_key = await sync_to_async(self._get_api_key)(raw_key)
         if api_key is None:
-            return await self.get_response(request)
+            return await self._anonymous_response(request)
 
         tier = await sync_to_async(self._effective_tier)(api_key)
         limit = APIKey.TIER_QUOTAS.get(
@@ -34,7 +37,9 @@ class TieredAPIKeyRateLimitMiddleware(MiddlewareMixin):
         )
 
         if limit is None:
-            return await self.get_response(request)
+            response = await self.get_response(request)
+            response[TIER_HEADER] = str(tier)
+            return response
 
         now = time.time()
         cache_key = f"{CACHE_PREFIX}:{api_key.pk}"
@@ -57,6 +62,7 @@ class TieredAPIKeyRateLimitMiddleware(MiddlewareMixin):
             )
             self._set_headers(
                 response,
+                tier=tier,
                 limit=limit,
                 remaining=0,
                 reset_at=reset_at,
@@ -71,10 +77,17 @@ class TieredAPIKeyRateLimitMiddleware(MiddlewareMixin):
         response = await self.get_response(request)
         self._set_headers(
             response,
+            tier=tier,
             limit=limit,
             remaining=max(0, limit - len(history)),
             reset_at=reset_at,
         )
+        return response
+
+    async def _anonymous_response(self, request):
+        # No quota is tracked without a key, so only the tier is reported.
+        response = await self.get_response(request)
+        response[TIER_HEADER] = str(ANONYMOUS_TIER)
         return response
 
     @staticmethod
@@ -97,10 +110,12 @@ class TieredAPIKeyRateLimitMiddleware(MiddlewareMixin):
     def _set_headers(
         response,
         *,
+        tier: str,
         limit: int,
         remaining: int,
         reset_at: int,
     ) -> None:
+        response[TIER_HEADER] = str(tier)
         response["X-RateLimit-Limit"] = str(limit)
         response["X-RateLimit-Remaining"] = str(remaining)
         response["X-RateLimit-Reset"] = str(reset_at)

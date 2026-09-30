@@ -170,3 +170,136 @@ def test_requests_without_x_api_key_are_not_rate_limited(request_factory):
 
     assert response.status_code == 200
     assert "X-RateLimit-Reset" not in response
+
+
+@pytest.mark.django_db
+def test_requests_without_x_api_key_report_free_tier(request_factory):
+    middleware = TieredAPIKeyRateLimitMiddleware(_ok_response)
+
+    response = _call(middleware, request_factory.get("/"))
+
+    assert response["X-RateLimit-Tier"] == "free"
+    assert "X-RateLimit-Remaining" not in response
+
+
+@pytest.mark.django_db
+def test_unknown_x_api_key_falls_back_to_free_tier(request_factory):
+    middleware = TieredAPIKeyRateLimitMiddleware(_ok_response)
+
+    response = _call(
+        middleware, request_factory.get("/", HTTP_X_API_KEY="not-a-real-key")
+    )
+
+    assert response.status_code == 200
+    assert response["X-RateLimit-Tier"] == "free"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_api_key_response_reports_tier_and_remaining(request_factory, monkeypatch):
+    user = User.objects.create_user(username="header-user")
+    api_key = APIKey.objects.create(
+        user=user,
+        name="Header Key",
+        tier=APIKey.Tier.FREE,
+        quota_per_hour=3,
+    )
+    monkeypatch.setitem(APIKey.TIER_QUOTAS, APIKey.Tier.FREE, 3)
+
+    middleware = TieredAPIKeyRateLimitMiddleware(_ok_response)
+
+    first = _call(middleware, request_factory.get("/", HTTP_X_API_KEY=api_key.key))
+    second = _call(middleware, request_factory.get("/", HTTP_X_API_KEY=api_key.key))
+
+    assert first["X-RateLimit-Tier"] == "free"
+    assert first["X-RateLimit-Remaining"] == "2"
+    assert second["X-RateLimit-Remaining"] == "1"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_rate_limited_response_reports_tier(request_factory, monkeypatch):
+    user = User.objects.create_user(username="blocked-user")
+    api_key = APIKey.objects.create(
+        user=user,
+        name="Blocked Key",
+        tier=APIKey.Tier.FREE,
+        quota_per_hour=1,
+    )
+    monkeypatch.setitem(APIKey.TIER_QUOTAS, APIKey.Tier.FREE, 1)
+
+    middleware = TieredAPIKeyRateLimitMiddleware(_ok_response)
+
+    _call(middleware, request_factory.get("/", HTTP_X_API_KEY=api_key.key))
+    blocked = _call(middleware, request_factory.get("/", HTTP_X_API_KEY=api_key.key))
+
+    assert blocked.status_code == 429
+    assert blocked["X-RateLimit-Tier"] == "free"
+    assert blocked["X-RateLimit-Remaining"] == "0"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_organization_tier_is_reported_for_team_key(request_factory, monkeypatch):
+    user = User.objects.create_user(username="org-header-user")
+    organization = Organization.objects.create(
+        name="Header Org",
+        owner=user,
+        tier=Organization.Tier.PRO,
+    )
+    team = Team.objects.create(
+        name="Header Team",
+        organization=organization,
+        created_by=user,
+    )
+    TeamMembership.objects.create(
+        team=team,
+        user=user,
+        role=TeamMembership.Role.OWNER,
+    )
+    api_key = APIKey.objects.create(
+        user=user,
+        team=team,
+        name="Header Team Key",
+        tier=APIKey.Tier.FREE,
+        quota_per_hour=1,
+    )
+    monkeypatch.setitem(APIKey.TIER_QUOTAS, APIKey.Tier.PRO, 5)
+
+    middleware = TieredAPIKeyRateLimitMiddleware(_ok_response)
+
+    response = _call(middleware, request_factory.get("/", HTTP_X_API_KEY=api_key.key))
+
+    assert response["X-RateLimit-Tier"] == "pro"
+    assert response["X-RateLimit-Remaining"] == "4"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_unlimited_tier_reports_tier_only(request_factory):
+    user = User.objects.create_user(username="unlimited-header-user")
+    organization = Organization.objects.create(
+        name="Unlimited Org",
+        owner=user,
+        tier=Organization.Tier.ENTERPRISE,
+    )
+    team = Team.objects.create(
+        name="Unlimited Team",
+        organization=organization,
+        created_by=user,
+    )
+    TeamMembership.objects.create(
+        team=team,
+        user=user,
+        role=TeamMembership.Role.OWNER,
+    )
+    api_key = APIKey.objects.create(
+        user=user,
+        team=team,
+        name="Unlimited Key",
+        tier=APIKey.Tier.FREE,
+        quota_per_hour=1,
+    )
+
+    middleware = TieredAPIKeyRateLimitMiddleware(_ok_response)
+
+    response = _call(middleware, request_factory.get("/", HTTP_X_API_KEY=api_key.key))
+
+    assert response["X-RateLimit-Tier"] == "enterprise"
+    assert "X-RateLimit-Remaining" not in response

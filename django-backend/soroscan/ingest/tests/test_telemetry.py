@@ -71,3 +71,31 @@ class TelemetrySpanTests(TestCase):
         # span is still opened even though the RPC call short-circuits.
         client.get_contract_state("CABC123")
         self.assertIn("soroban.rpc.get_contract_state", self._span_names())
+
+
+class ProcessMemoryGaugeTests(TestCase):
+    def test_gauge_reports_current_rss(self):
+        from prometheus_client import REGISTRY
+
+        value = REGISTRY.get_sample_value("soroscan_process_resident_memory_bytes")
+        self.assertIsNotNone(value)
+        self.assertGreater(value, 0)
+
+    def test_gauge_reads_rss_at_scrape_time(self):
+        from unittest.mock import patch
+
+        from prometheus_client import REGISTRY
+
+        with patch.object(telemetry._process, "memory_info") as memory_info:
+            memory_info.return_value.rss = 12345
+            value = REGISTRY.get_sample_value(
+                "soroscan_process_resident_memory_bytes"
+            )
+        self.assertEqual(value, 12345)
+
+    def test_metrics_endpoint_includes_memory_gauge(self):
+        response = self.client.get("/metrics")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "soroscan_process_resident_memory_bytes", response.content.decode()
+        )

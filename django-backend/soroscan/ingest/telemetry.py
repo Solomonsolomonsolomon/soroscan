@@ -1,8 +1,9 @@
-"""Tracing and payload-compression helpers for ingest flows.
+"""Tracing, payload-compression and process-memory helpers for ingest flows.
 
 Payload compression observations are recorded as the
-``soroscan_event_payload_compression_ratio`` Prometheus histogram and exposed
-in Prometheus text format at ``/metrics``.
+``soroscan_event_payload_compression_ratio`` Prometheus histogram, and the
+process resident set size as the ``soroscan_process_resident_memory_bytes``
+gauge. Both are exposed in Prometheus text format at ``/metrics``.
 """
 
 from __future__ import annotations
@@ -13,11 +14,29 @@ import os
 import zlib
 from typing import Any, Iterator, Mapping, Optional
 
+import psutil
 from opentelemetry import propagate, trace
+from prometheus_client import Gauge
 
-from .metrics import event_payload_compression_ratio
+from .metrics import _get_or_create, event_payload_compression_ratio
 
 tracer = trace.get_tracer("soroscan.ingest")
+
+_process = psutil.Process()
+
+
+def process_resident_memory_bytes() -> int:
+    """Return the current process resident set size (RSS) in bytes."""
+    return _process.memory_info().rss
+
+
+process_resident_memory_gauge = _get_or_create(
+    Gauge,
+    "soroscan_process_resident_memory_bytes",
+    "Resident set size (RSS) of the SoroScan process in bytes",
+)
+# Evaluated on every /metrics scrape, so the value is never stale.
+process_resident_memory_gauge.set_function(process_resident_memory_bytes)
 
 
 def configure_tracing() -> None:

@@ -156,6 +156,7 @@ The required primary variables `SOROBAN_RPC_URL` and `STELLAR_NETWORK_PASSPHRASE
 | `LOG_FORMAT`                    | String               |       No | Empty                          | Set to `json` to enable structured JSON console logs. Any other value uses text logs. |
 | `SLOW_QUERY_THRESHOLD_MS`       | Integer milliseconds |       No | `100`                          | Application slow-query logging threshold.                                             |
 | `DATABASE_SLOW_QUERY_THRESHOLD` | Float seconds        |       No | `1.0`                          | Database-level slow-query threshold.                                                  |
+| `REQUEST_LATENCY_LOG_THRESHOLD_MS` | Integer milliseconds |    No | `100`                          | Requests slower than this log a JSON `db_time_ms` / `cpu_time_ms` breakdown.          |
 | `SILK_PROFILER_LOG_DIR`         | Filesystem path      |       No | `django-backend/logs/profiler` | Output directory used by the Silk profiler.                                           |
 
 ## Email and alert delivery

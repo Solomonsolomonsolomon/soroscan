@@ -528,6 +528,10 @@ LOGGING = {
 
 LOGGING_SLOW_QUERIES_THRESHOLD_MS = env.int("SLOW_QUERY_THRESHOLD_MS", default=100)
 DATABASE_SLOW_QUERY_THRESHOLD = env.float("DATABASE_SLOW_QUERY_THRESHOLD", default=1.0)
+# Requests slower than this log a JSON db_time_ms / cpu_time_ms breakdown.
+REQUEST_LATENCY_LOG_THRESHOLD_MS = env.int(
+    "REQUEST_LATENCY_LOG_THRESHOLD_MS", default=100
+)
 
 _LOG_DIR = BASE_DIR / "logs"
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -553,6 +557,11 @@ LOGGING["loggers"]["soroscan.migrate"] = {
     "propagate": False,
 }
 LOGGING["loggers"]["django.performance.database"] = {
+    "handlers": ["console"],
+    "level": "WARNING",
+    "propagate": False,
+}
+LOGGING["loggers"]["django.performance.request"] = {
     "handlers": ["console"],
     "level": "WARNING",
     "propagate": False,
